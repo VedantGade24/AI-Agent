@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>J.A.R.V.I.S — Vedant's AI Core</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+:root {
+  --green: #00ff41;
+  --green-dim: #00aa2a;
+  --green-faint: rgba(0,255,65,0.07);
+  --green-glow: rgba(0,255,65,0.4);
+  --amber: #ffb300;
+  --amber-dim: rgba(255,179,0,0.15);
+  --bg: #000;
+  --panel: rgba(0,10,2,0.92);
+  --border: rgba(0,255,65,0.35);
+}
+
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  font-family: 'Share Tech Mono', monospace;
+  background: var(--bg);
+  color: var(--green);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+body::before {
+  content: "";
+  position: fixed; inset: 0;
+  background-image:
+    linear-gradient(rgba(0,255,65,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,65,0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: gridPan 20s linear infinite;
+  pointer-events: none;
+}
+@keyframes gridPan { from{background-position:0 0} to{background-position:40px 40px} }
+
+body::after {
+  content: "";
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(transparent 0px,rgba(0,255,65,0.015) 1px,transparent 2px);
+  pointer-events: none; z-index: 10;
+}
+
+/* Boot */
+#boot-screen {
+  position: fixed; inset: 0; background: #000; z-index: 9999;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px;
+  transition: opacity 0.5s;
+}
+.boot-logo {
+  font-family: 'Orbitron', monospace; font-size: clamp(24px,5vw,52px);
+  font-weight: 900; letter-spacing: 12px; color: var(--green);
+  text-shadow: 0 0 30px var(--green), 0 0 60px var(--green-glow);
+  animation: flicker 3s ease forwards;
+}
+@keyframes flicker {
+  0%{opacity:0} 10%{opacity:1} 12%{opacity:0.3} 14%{opacity:1} 30%{opacity:0.8} 32%{opacity:1} 100%{opacity:1}
+}
+.boot-lines { font-size:13px; color:var(--green-dim); line-height:2; text-align:left; width:320px; }
+.boot-line { opacity:0; animation:fadeIn 0.3s forwards; }
+.boot-line:nth-child(1){animation-delay:0.5s}
+.boot-line:nth-child(2){animation-delay:1.0s}
+.boot-line:nth-child(3){animation-delay:1.5s}
+.boot-line:nth-child(4){animation-delay:2.0s}
+.boot-line:nth-child(5){animation-delay:2.5s;color:var(--green);font-weight:bold}
+@keyframes fadeIn { to{opacity:1} }
+.boot-bar-wrap { width:320px; height:3px; background:rgba(0,255,65,0.1); border:1px solid var(--border); }
+.boot-bar { height:100%; background:var(--green); box-shadow:0 0 10px var(--green); animation:loadBar 2.8s ease forwards; }
+@keyframes loadBar { from{width:0} to{width:100%} }
+
+/* Layout */
+.wrapper {
+  width: min(980px, 94vw);
+  display: flex; flex-direction: column;
+  height: 94vh; opacity: 0;
+  animation: wrapperIn 0.6s ease 3.6s forwards;
+}
+@keyframes wrapperIn { to{opacity:1} }
+
+/* Header */
+header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 20px;
+  border:1px solid var(--border); border-bottom:none;
+  background:var(--panel); position:relative;
+}
+.header-title {
+  font-family:'Orbitron',monospace; font-size:22px; font-weight:900;
+  letter-spacing:8px; text-shadow:0 0 15px var(--green);
+}
+.header-title span { color:var(--green-dim); font-weight:400; font-size:12px; letter-spacing:2px; display:block; margin-top:2px; }
+.header-meta { display:flex; gap:20px; align-items:center; font-size:12px; color:var(--green-dim); }
+.status-dot {
+  width:8px; height:8px; background:var(--green); border-radius:50%;
+  box-shadow:0 0 8px var(--green); animation:blink 2s ease-in-out infinite;
+  display:inline-block; margin-right:6px;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+#clock { font-family:'Orbitron',monospace; font-size:13px; color:var(--green); letter-spacing:2px; }
+#mode-badge {
+  font-size:10px; letter-spacing:2px; padding:3px 10px;
+  border:1px solid var(--green-dim); color:var(--green-dim);
+  transition:all 0.3s;
+}
+#mode-badge.research { border-color:var(--amber); color:var(--amber); }
+header::before,header::after {
+  content:""; position:absolute; width:10px; height:10px;
+  border-color:var(--green); border-style:solid;
+}
+header::before { top:-1px; right:-1px; border-width:2px 2px 0 0; }
+header::after  { bottom:-1px; left:-1px; border-width:0 0 2px 2px; }
+
+/* Chat box */
+#chat-box {
+  flex:1; overflow-y:auto;
+  background:var(--panel);
+  border:1px solid var(--border); border-top:none; border-bottom:none;
+  padding:24px 28px; scroll-behavior:smooth;
+}
+#chat-box::-webkit-scrollbar { width:4px; }
+#chat-box::-webkit-scrollbar-thumb { background:var(--green-dim); border-radius:2px; }
+
+.welcome {
+  text-align:center; padding:40px 0 20px; opacity:0.5;
+  font-size:13px; line-height:2; color:var(--green-dim); letter-spacing:1px;
+}
+
+/* Messages */
+.msg-row { display:flex; margin:14px 0; animation:msgIn 0.3s ease; }
+@keyframes msgIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.msg-row.user { justify-content:flex-end; }
+.msg-row.ai   { justify-content:flex-start; flex-direction:column; gap:8px; }
+
+.bubble {
+  max-width:72%; padding:12px 16px; font-size:14px; line-height:1.7;
+  word-break:break-word; overflow-wrap:break-word;
+}
+.msg-row.user .bubble {
+  background:rgba(0,255,65,0.08); border:1px solid rgba(0,255,65,0.4);
+  color:var(--green); text-align:right;
+}
+.msg-row.user .bubble::before { content:"> "; color:var(--green-dim); }
+.msg-row.ai .bubble {
+  background:transparent; border-left:3px solid var(--green);
+  padding-left:20px; color:var(--green);
+}
+.msg-row.ai.research-msg .bubble { border-left-color: var(--amber); }
+
+.ai-tag {
+  font-family:'Orbitron',monospace; font-size:10px;
+  color:var(--green-dim); letter-spacing:2px; display:block; margin-bottom:6px;
+}
+.research-msg .ai-tag { color: var(--amber); }
+
+/* Sources */
+.sources-block {
+  max-width: 72%;
+  padding: 8px 12px;
+  border: 1px solid rgba(255,179,0,0.2);
+  background: var(--amber-dim);
+  font-size: 11px;
+  color: rgba(255,179,0,0.7);
+  letter-spacing: 0.5px;
+  line-height: 1.8;
+}
+.sources-block a {
+  color: rgba(255,179,0,0.9);
+  text-decoration: none;
+  display: block;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sources-block a:hover { color: var(--amber); text-decoration: underline; }
+.sources-label { color: var(--amber); font-size: 10px; letter-spacing: 2px; margin-bottom: 4px; display:block; }
+
+/* Typing */
+.typing-dots span {
+  display:inline-block; width:6px; height:6px;
+  background:var(--green); border-radius:50%; margin:0 2px;
+  animation:dotBounce 1.2s ease-in-out infinite;
+}
+.typing-dots span:nth-child(2){animation-delay:0.2s}
+.typing-dots span:nth-child(3){animation-delay:0.4s}
+@keyframes dotBounce { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} }
+
+/* Research scanning animation */
+.scanning-text {
+  font-size:12px; color:var(--amber); opacity:0.8;
+  animation:scanPulse 1.5s ease-in-out infinite;
+}
+@keyframes scanPulse { 0%,100%{opacity:0.4} 50%{opacity:1} }
+
+/* Input area */
+#input-area {
+  display:flex; align-items:stretch;
+  border:1px solid var(--border); border-top:2px solid var(--green);
+  background:var(--panel); position:relative;
+}
+.input-prefix {
+  display:flex; align-items:center; padding:0 16px;
+  font-family:'Orbitron',monospace; font-size:11px;
+  color:var(--green-dim); border-right:1px solid var(--border);
+  letter-spacing:1px; white-space:nowrap;
+}
+#user-input {
+  flex:1; min-width:0; padding:16px 20px;
+  background:transparent; border:none; outline:none;
+  color:var(--green); font-size:14px;
+  font-family:'Share Tech Mono',monospace; letter-spacing:0.5px;
+}
+#user-input::placeholder { color:rgba(0,255,65,0.25); }
+.icon-btn {
+  background:transparent; border:none; border-left:1px solid var(--border);
+  color:var(--green-dim); padding:0 18px; cursor:pointer;
+  font-size:18px; transition:all 0.2s; display:flex; align-items:center; flex-shrink:0;
+}
+.icon-btn:hover { background:var(--green-faint); color:var(--green); }
+#mic-btn.listening { color:var(--green); animation:pulse 1s infinite; }
+@keyframes pulse { 0%,100%{box-shadow:inset 0 0 0 var(--green-glow)} 50%{box-shadow:inset 0 0 20px var(--green-glow)} }
+#send-btn {
+  background:rgba(0,255,65,0.08); border:none; border-left:1px solid var(--border);
+  color:var(--green); padding:0 28px; cursor:pointer;
+  font-family:'Orbitron',monospace; font-size:11px; letter-spacing:3px;
+  font-weight:700; transition:all 0.2s; flex-shrink:0;
+}
+#send-btn:hover { background:var(--green); color:#000; box-shadow:0 0 20px var(--green-glow); }
+#send-btn:disabled { opacity:0.4; cursor:not-allowed; pointer-events:none; }
+
+/* Footer */
+footer {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:8px 20px;
+  border:1px solid var(--border); border-top:none;
+  background:var(--panel); font-size:11px;
+  color:rgba(0,255,65,0.3); letter-spacing:1px;
+}
+#research-indicator {
+  color: rgba(255,179,0,0.5);
+  display: none;
+}
+#research-indicator.active { display: inline; animation: scanPulse 1s infinite; }
+
+@media (max-width:600px) {
+  .header-title { font-size:16px; letter-spacing:4px; }
+  .bubble { max-width:88%; font-size:13px; }
+  #send-btn { padding:0 16px; font-size:10px; letter-spacing:2px; }
+  .input-prefix { display:none; }
+}
+</style>
+</head>
+<body>
+
+<div id="boot-screen">
+  <div class="boot-logo">J.A.R.V.I.S</div>
+  <div class="boot-lines">
+    <div class="boot-line">▸ Initializing AI Core................. OK</div>
+    <div class="boot-line">▸ Loading Neural Pathways.............. OK</div>
+    <div class="boot-line">▸ Web Research Engine.................. OK</div>
+    <div class="boot-line">▸ Connecting to Groq Engine............ OK</div>
+    <div class="boot-line">▸ Welcome back, Vedant.</div>
+  </div>
+  <div class="boot-bar-wrap"><div class="boot-bar"></div></div>
+</div>
+
+<div class="wrapper">
+  <header>
+    <div class="header-title">
+      J.A.R.V.I.S
+      <span>JUST A RATHER VERY INTELLIGENT SYSTEM</span>
+    </div>
+    <div class="header-meta">
+      <div id="mode-badge">CHAT MODE</div>
+      <div><span class="status-dot"></span>ONLINE</div>
+      <div id="clock">00:00:00</div>
+    </div>
+  </header>
+
+  <div id="chat-box">
+    <div class="welcome">
+      ── SECURE CHANNEL ESTABLISHED ──<br>
+      AI CORE · WEB RESEARCH ENGINE · GROQ LLAMA-3.3<br>
+      <br>
+      Good to see you, Vedant. Ask me anything or say "search..." to research the web.
+    </div>
+  </div>
+
+  <div id="input-area">
+    <div class="input-prefix">CMD://</div>
+    <input type="text" id="user-input" placeholder="Ask anything or say 'search...' to research the web..." autocomplete="off" />
+    <button class="icon-btn" id="mic-btn" title="Voice Input">🎤</button>
+    <button class="icon-btn" id="voice-toggle" title="Toggle Voice">🔊</button>
+    <button id="send-btn">EXECUTE</button>
+  </div>
+
+  <footer>
+    <span>JARVIS v3.0 · VEDANT'S PERSONAL AI</span>
+    <span id="research-indicator">⬡ SCANNING WEB...</span>
+    <span id="msg-count">MESSAGES: 0</span>
+    <span>LLAMA-3.3-70B · GROQ ENGINE</span>
+  </footer>
+</div>
+
+<script>
+const chatBox   = document.getElementById("chat-box");
+const userInput = document.getElementById("user-input");
+const sendBtn   = document.getElementById("send-btn");
+const msgCounter= document.getElementById("msg-count");
+const modeBadge = document.getElementById("mode-badge");
+const researchIndicator = document.getElementById("research-indicator");
+
+let voiceEnabled = true;
+let msgCount = 0;
+let isLoading = false;
+
+// Boot
+setTimeout(() => {
+  const boot = document.getElementById("boot-screen");
+  boot.style.opacity = "0";
+  setTimeout(() => boot.style.display = "none", 500);
+}, 3500);
+
+// Clock
+setInterval(() => {
+  document.getElementById("clock").innerText =
+    new Date().toLocaleTimeString("en-US", { hour12: false });
+}, 1000);
+
+// Enter key
+userInput.addEventListener("keypress", e => {
+  if (e.key === "Enter" && !isLoading) sendMessage();
+});
+
+// Voice toggle
+document.getElementById("voice-toggle").addEventListener("click", () => {
+  voiceEnabled = !voiceEnabled;
+  document.getElementById("voice-toggle").innerText = voiceEnabled ? "🔊" : "🔇";
+  if (!voiceEnabled) window.speechSynthesis.cancel();
+});
+
+function speak(text) {
+  if (!voiceEnabled) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.slice(0, 300));
+  u.lang = "en-US"; u.rate = 1.05; u.pitch = 0.9;
+  speechSynthesis.speak(u);
+}
+
+// Mic
+document.getElementById("mic-btn").addEventListener("click", () => {
+  const R = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!R) { alert("Speech recognition not supported."); return; }
+  const rec = new R();
+  rec.lang = "en-US"; rec.start();
+  const micBtn = document.getElementById("mic-btn");
+  micBtn.classList.add("listening"); micBtn.innerText = "🔴";
+  rec.onresult = e => {
+    userInput.value = e.results[0][0].transcript;
+    micBtn.classList.remove("listening"); micBtn.innerText = "🎤";
+    sendMessage();
+  };
+  rec.onerror = rec.onnomatch = () => {
+    micBtn.classList.remove("listening"); micBtn.innerText = "🎤";
+  };
+});
+
+sendBtn.addEventListener("click", () => { if (!isLoading) sendMessage(); });
+
+function escHtml(str) {
+  return str
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/\n/g,"<br>");
+}
+
+function appendUserMsg(text) {
+  const welcome = chatBox.querySelector(".welcome");
+  if (welcome) welcome.remove();
+  const row = document.createElement("div");
+  row.className = "msg-row user";
+  row.innerHTML = `<div class="bubble">${escHtml(text)}</div>`;
+  chatBox.appendChild(row);
+  chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+function appendAIMsg(text, isResearch = false, sources = []) {
+  const row = document.createElement("div");
+  row.className = "msg-row ai" + (isResearch ? " research-msg" : "");
+
+  const tag = isResearch ? "J.A.R.V.I.S · WEB RESEARCH" : "J.A.R.V.I.S";
+
+  let sourcesHtml = "";
+  if (sources && sources.length > 0) {
+    const links = sources.map(s =>
+      `<a href="${s.url}" target="_blank" rel="noopener">↗ ${s.title || s.url}</a>`
+    ).join("");
+    sourcesHtml = `<div class="sources-block"><span class="sources-label">SOURCES SCANNED</span>${links}</div>`;
+  }
+
+  row.innerHTML = `
+    <div class="bubble">
+      <span class="ai-tag">${tag}</span>
+      ${escHtml(text)}
+    </div>
+    ${sourcesHtml}`;
+
+  chatBox.appendChild(row);
+  chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+function showTyping(isResearch = false) {
+  const row = document.createElement("div");
+  row.className = "msg-row ai" + (isResearch ? " research-msg" : "");
+  row.id = "typing-row";
+
+  const content = isResearch
+    ? `<span class="ai-tag">J.A.R.V.I.S · WEB RESEARCH</span>
+       <span class="scanning-text">Scanning web sources...</span>`
+    : `<span class="ai-tag">J.A.R.V.I.S · PROCESSING</span>
+       <div class="typing-dots"><span></span><span></span><span></span></div>`;
+
+  row.innerHTML = `<div class="bubble">${content}</div>`;
+  chatBox.appendChild(row);
+  chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+function removeTyping() {
+  const t = document.getElementById("typing-row");
+  if (t) t.remove();
+}
+
+// Research trigger words (mirrors backend)
+const RESEARCH_TRIGGERS = [
+  "search","find","look up","what is","what are","who is","who are",
+  "how to","how does","explain","latest","news","recent","update",
+  "price","weather","score","release","launch","review","best",
+  "compare","difference between"," vs ","tutorial","guide","learn"
+];
+
+function isResearchQuery(msg) {
+  const m = msg.toLowerCase();
+  return RESEARCH_TRIGGERS.some(t => m.includes(t));
+}
+
+async function sendMessage() {
+  const message = userInput.value.trim();
+  if (!message || isLoading) return;
+
+  const research = isResearchQuery(message);
+
+  isLoading = true;
+  sendBtn.disabled = true;
+  userInput.disabled = true;
+
+  // Update mode badge
+  if (research) {
+    modeBadge.textContent = "RESEARCH MODE";
+    modeBadge.classList.add("research");
+    researchIndicator.classList.add("active");
+  } else {
+    modeBadge.textContent = "CHAT MODE";
+    modeBadge.classList.remove("research");
+  }
+
+  appendUserMsg(message);
+  userInput.value = "";
+  msgCount++;
+  msgCounter.innerText = `MESSAGES: ${msgCount}`;
+  showTyping(research);
+
+  const datetimeStr = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+
+  try {
+    const res = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, datetime: datetimeStr, timezone: "Asia/Kolkata" })
+    });
+
+    const data = await res.json();
+    removeTyping();
+
+    if (!res.ok) {
+      appendAIMsg(data.reply || "An error occurred.", false, []);
+    } else {
+      appendAIMsg(data.reply, data.mode === "research", data.sources || []);
+      speak(data.reply);
+      msgCount++;
+      msgCounter.innerText = `MESSAGES: ${msgCount}`;
+    }
+
+  } catch (err) {
+    removeTyping();
+    appendAIMsg("[ERROR] Cannot reach server. Make sure Flask is running.", false, []);
+  } finally {
+    isLoading = false;
+    sendBtn.disabled = false;
+    userInput.disabled = false;
+    userInput.focus();
+    researchIndicator.classList.remove("active");
+    modeBadge.textContent = "CHAT MODE";
+    modeBadge.classList.remove("research");
+  }
+}
+</script>
+</body>
+</html>
