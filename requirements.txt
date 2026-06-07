@@ -1,7 +1,9 @@
 flask
 groq
-duckduckgo-search
+google-search-results
 python-dotenv
 httpx
 beautifulsoup4
 lxml
+pymupdf
+werkzeug
