@@ -1,9 +1,0 @@
-flask
-groq
-google-search-results
-python-dotenv
-httpx
-beautifulsoup4
-lxml
-pymupdf
-werkzeug
