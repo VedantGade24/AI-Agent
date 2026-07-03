@@ -18,6 +18,8 @@ from contextlib import contextmanager
 import json
 import re
 from datetime import datetime
+from youtube_transcript_api import YouTubeTranscriptApi
+import subprocess
 
 load_dotenv()
 
@@ -63,7 +65,8 @@ DB_FILE          = "nova_sessions.db"
 UPLOAD_FOLDER    = "uploads"
 ALLOWED_EXTENSIONS = {"pdf", "txt", "md", "py", "js", "ts", "json", "csv", "html", "css", "yaml", "yml", "xml", "sh", "docx"}
 ALLOWED_IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "webp"}
-ALL_ALLOWED        = ALLOWED_EXTENSIONS | ALLOWED_IMAGE_EXTS
+ALLOWED_VIDEO_EXTS = {"mp4", "mov", "mkv", "webm", "avi"}
+ALL_ALLOWED        = ALLOWED_EXTENSIONS | ALLOWED_IMAGE_EXTS | ALLOWED_VIDEO_EXTS
 IMAGE_MIME         = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}
 MAX_FILE_MB      = 15
 MAX_MESSAGE_CHARS = 8000
@@ -122,6 +125,14 @@ DOCUMENT_PROMPT = """You are Nova. The user has uploaded a document. Your job:
 2. List the key points (max 10 bullet points).
 3. Note any important numbers, dates, names, or decisions mentioned.
 4. End with one sentence suggesting what the user might want to do next with this content.
+
+Be concise. No filler. Use markdown formatting."""
+
+VIDEO_PROMPT = """You are Nova. The user has shared a video (via transcript). Your job:
+1. Give a 3-5 sentence overview of what the video covers.
+2. List the key points or moments (max 10 bullet points).
+3. Note any important names, numbers, or claims made.
+4. End with one sentence suggesting what the user might want to do next.
 
 Be concise. No filler. Use markdown formatting."""
 
@@ -404,21 +415,23 @@ def extract_text_file(filepath: str) -> str:
     with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
         return f.read()
 
-def summarise_document(filename: str, text: str, session_id: str) -> str:
+def summarise_content(source_name: str, text: str, session_id: str, prompt: str = DOCUMENT_PROMPT, label: str = "Uploaded") -> str:
+    """Generic summariser used by both document uploads and video summaries.
+    `label` controls how the source is tagged in history (e.g. 'Uploaded' vs 'Video')."""
     words = text.split()
     if len(words) > 6000:
         text = " ".join(words[:6000]) + "\n\n[... truncated for length ...]"
 
-    prompt = (
-        f"[File: {filename}]\n\n{text}\n\n"
-        "Summarise this document as instructed."
+    full_prompt = (
+        f"[{label}: {source_name}]\n\n{text}\n\n"
+        "Summarise this as instructed."
     )
     try:
         resp    = client.chat.completions.create(
             model=MODEL,
             messages=[
-                {"role": "system", "content": DOCUMENT_PROMPT},
-                {"role": "user",   "content": prompt}
+                {"role": "system", "content": prompt},
+                {"role": "user",   "content": full_prompt}
             ],
             temperature=0.3,
             max_tokens=900
@@ -427,14 +440,29 @@ def summarise_document(filename: str, text: str, session_id: str) -> str:
 
         # Add to session history so follow-up questions work
         history = load_history(session_id)
-        history.append({"role": "user",      "content": f"[Uploaded: {filename}]\n\n{text[:3000]}"})
+        history.append({"role": "user",      "content": f"[{label}: {source_name}]\n\n{text[:3000]}"})
         history.append({"role": "assistant", "content": summary})
         history = trim_history(history)
         save_history(session_id, history)
         return summary
     except Exception as e:
-        logger.error(f"Document summarisation error: {e}")
-        return "Failed to summarise the document. Please try again."
+        logger.error(f"Summarisation error: {e}")
+        return "Failed to summarise. Please try again."
+
+def summarise_document(filename: str, text: str, session_id: str) -> str:
+    """Kept for backward compatibility — thin wrapper around summarise_content."""
+    return summarise_content(filename, text, session_id, DOCUMENT_PROMPT, "Uploaded")
+
+YT_ID_RE = re.compile(r"(?:v=|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})")
+
+def get_youtube_transcript(url: str) -> str:
+    match = YT_ID_RE.search(url)
+    if not match:
+        raise ValueError("Couldn't find a valid YouTube video ID in that URL.")
+    video_id = match.group(1)
+    ytt_api = YouTubeTranscriptApi()
+    fetched = ytt_api.fetch(video_id)
+    return " ".join(snippet.text for snippet in fetched)
 
 # ── WEB SEARCH ─────────────────────────────────────────────────────────────────
 
@@ -768,6 +796,43 @@ def upload():
             logger.error(f"Image upload error: {e}")
             return jsonify({"error": "Failed to process image."}), 500
 
+    # ── Video path: extract audio → Whisper transcribe → summarize ─────────────
+    if ext in ALLOWED_VIDEO_EXTS:
+        filepath   = os.path.join(UPLOAD_FOLDER, filename)
+        audio_path = filepath + ".mp3"
+        file.save(filepath)
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", filepath, "-vn", "-acodec", "mp3", audio_path],
+                check=True, capture_output=True, timeout=120
+            )
+            with open(audio_path, "rb") as f:
+                transcription = client.audio.transcriptions.create(file=f, model="whisper-large-v3")
+            text = transcription.text
+            if not text.strip():
+                return jsonify({"error": "No speech detected in video."}), 400
+
+            session_id = get_session_id()
+            summary    = summarise_content(filename, text, session_id, VIDEO_PROMPT, "Video")
+            return jsonify({
+                "reply":      summary,
+                "filename":   filename,
+                "char_count": len(text),
+                "mode":       "document",
+                "sources":    [],
+                "is_image":   False
+            })
+        except subprocess.CalledProcessError as e:
+            logger.error(f"ffmpeg error: {e.stderr}")
+            return jsonify({"error": "Could not extract audio from video."}), 500
+        except Exception as e:
+            logger.error(f"Video processing error: {e}")
+            return jsonify({"error": "Failed to process video."}), 500
+        finally:
+            for p in (filepath, audio_path):
+                if os.path.exists(p):
+                    os.remove(p)
+
     # ── Document/text path: existing extraction ────────────────────────────────
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     file.save(filepath)
@@ -798,6 +863,48 @@ def upload():
     return jsonify({
         "reply":      summary,
         "filename":   filename,
+        "char_count": len(text),
+        "mode":       "document",
+        "sources":    [],
+        "is_image":   False
+    })
+
+
+@app.route("/video", methods=["POST"])
+@limiter.limit("10 per minute")
+def video_summary():
+    if not request.is_json:
+        return jsonify({"error": "Expected JSON"}), 400
+
+    data = request.get_json(silent=True) or {}
+    url  = (data.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "No URL provided"}), 400
+
+    try:
+        text = get_youtube_transcript(url)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Transcript fetch error: {e}")
+        err_str = str(e)
+        if "403" in err_str or "blocked" in err_str.lower() or "IP" in err_str:
+            hint = "YouTube blocked this request (common on cloud/shared IPs — try again, or from a different network)."
+        elif "disabled" in err_str.lower() or "no element found" in err_str.lower():
+            hint = "This video likely has captions disabled."
+        else:
+            hint = "Video may be private, age-restricted, or unavailable."
+        return jsonify({"error": f"Couldn't fetch transcript. {hint}"}), 400
+
+    if not text.strip():
+        return jsonify({"error": "Transcript was empty."}), 400
+
+    session_id = get_session_id()
+    summary    = summarise_content(url, text, session_id, VIDEO_PROMPT, "Video")
+
+    return jsonify({
+        "reply":      summary,
+        "filename":   url,
         "char_count": len(text),
         "mode":       "document",
         "sources":    [],
@@ -878,4 +985,4 @@ if __name__ == "__main__":
     init_db()
     debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
     port  = int(os.getenv("PORT", 5000))
-    app.run(debug=debug, port=port)
+    app.run(host="0.0.0.0", debug=debug, port=port)
